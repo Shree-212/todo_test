@@ -1,5 +1,6 @@
 import axios from 'axios';
 import Endpoints from './Endpoints';
+import { API_BASE_URL } from '@env';
 
 export interface SuccessResponse {
     success: boolean;
@@ -12,7 +13,7 @@ export default class API {
     
     constructor(
         base: Axios.AxiosInstance = axios.create({
-            baseURL: process.env.API_BASE_URL || 'http://localhost:8000/',
+            baseURL: API_BASE_URL || 'http://localhost:8000/',
             headers: {
                 'Content-Type': 'application/json'
             }
