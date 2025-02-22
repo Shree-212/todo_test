@@ -1,11 +1,17 @@
 import API from "./API";
 import LastSaved from "../models/LastSaved";
+import { API_BASE_URL } from '@env';
 
 export default class LastSavedAPI extends API {
     protected endpoint: string;
 
     constructor() {
-        super();
+        super(axios.create({
+            baseURL: API_BASE_URL || 'http://localhost:8000/',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }));
         this.endpoint = this.endpoints.lastSaved || '';
     }
 

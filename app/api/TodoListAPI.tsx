@@ -1,11 +1,17 @@
 import API, { SuccessResponse } from "./API";
 import TodoList from "../models/TodoList";
+import { API_BASE_URL } from '@env';
 
 export default class TodoListAPI extends API {
     protected endpoint: string;
 
     constructor() {
-        super();
+        super(axios.create({
+            baseURL: API_BASE_URL || 'http://localhost:8000/',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }));
         this.endpoint = this.endpoints.todoLists || '';
     }
 

@@ -1,3 +1,4 @@
+import axios from 'axios';
 import Endpoints from './Endpoints';
 import { API_BASE_URL } from '@env';
 

@@ -1,11 +1,17 @@
 import API, { SuccessResponse } from "./API";
 import TodoCard from "../models/TodoCard";
+import { API_BASE_URL } from '@env';
 
 export default class TodoCardAPI extends API {
     protected endpoint: string;
 
     constructor() {
-        super();
+        super(axios.create({
+            baseURL: API_BASE_URL || 'http://localhost:8000/',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        }));
         this.endpoint = this.endpoints.TodoCards || '';
     }
 
