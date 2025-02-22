@@ -142,10 +142,18 @@ const deleteCategory = (id) => {
         id: Date.now().toString(),
         categoryId: selectedCategoryId,
         text: taskText,
+        completed: false,
+        createdAt: new Date().toLocaleString(),
       };
       setTasks([...tasks, newTask]);
       setTaskText('');
     }
+  };
+
+  const toggleTaskStatus = (id) => {
+    setTasks(tasks.map(task =>
+      task.id === id ? { ...task, completed: !task.completed } : task
+    ));
   };
 
   // Delete a task
@@ -184,7 +192,16 @@ const deleteCategory = (id) => {
         </>
       ) : (
         <>
-          <Text style={styles.taskText}>{item.text}</Text>
+          <Text style={[styles.taskText, item.completed && { textDecorationLine: 'line-through' }]}>
+          {item.text}
+        </Text>
+        {/* Toggle button for marking as done/not done */}
+        <Text style={styles.timestamp}>Created at: {item.createdAt}</Text>
+        <Button 
+          title={item.completed ? "Not Done" : "Done"}
+          onPress={() => toggleTaskStatus(item.id)}
+        />
+          {/* <Text style={styles.taskText}>{item.text}</Text> */}
           <Button title="Edit" onPress={() => startEditingTask(item)} />
           <Button title="Delete" onPress={() => deleteTask(item.id)} />
         </>
@@ -258,6 +275,7 @@ const deleteCategory = (id) => {
 
   return (
     <View style={styles.container}>
+      <Text style={styles.title}>Add Time Stamp</Text>
       <Text style={styles.title}>Dynamic Todo List App</Text>
 
       {/* Section to add a new category */}
