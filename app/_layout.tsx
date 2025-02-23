@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import TodoList from './models/TodoList';
 import TodoCard from './models/TodoCard';
-import { createTodoCard, createTodoList, deleteTodoCard, deleteTodoList, readLastSaved, readTodoCards, readTodoLists, SuccessResponse, updateTodoCard, updateTodoList } from './api';
+import { createTodoCard, createTodoList, deleteTodoCard, deleteTodoList, readLastSaved, readTodoCards, readTodoLists, SuccessResponse, syncToCloud, updateTodoCard, updateTodoList } from './api';
 import { v4 } from 'uuid';
 import LastSaved from './models/LastSaved';
 import { TextInput, TouchableOpacity, View, Text } from 'react-native';
@@ -40,7 +40,7 @@ export default function App() {
     } catch (error: any) {
       if (error && "code" in error && error["code"] == "ERR_NETWORK") {
         // Offline
-        
+        saveLocalData('syncNeeded', true);
       }
       console.error("API call failed:", error);
     }
@@ -48,29 +48,35 @@ export default function App() {
 
   // Fetch lists & cards
   useEffect(() => {
-    getLocalData('lists').then(localLists => {
+    (async () => {
+      const localLists = await getLocalData('lists');
       setLists(localLists as TodoList[] || []);
-    });
-    getLocalData('cards').then(localCards => {
+      const localCards = await getLocalData('cards');
       setCards(localCards as TodoCard[] || []);
-    });
-    getLocalData('lastSaved').then(localLastSaved => {
+      const localLastSaved = await getLocalData('lastSaved');
       setLastSaved(localLastSaved.timestamp);
-    })
-    executeApiCall(
-      readTodoLists,
-      (response) => {
-        setLists(response as TodoList[]);
-        saveLocalData('lists', response);
+      const syncNeeded = await getLocalData('syncNeeded');
+      if (syncNeeded) {
+        await executeApiCall(() => syncToCloud(localLists, localCards));
+        await saveLocalData('syncNeeded', false);
       }
-    );
-    executeApiCall(
-      readTodoCards,
-      (response) => {
-        setCards(response as TodoCard[]);
-        saveLocalData('cards', response);
+      else {
+        await executeApiCall(
+          readTodoLists,
+          (response) => {
+            setLists(response as TodoList[]);
+            saveLocalData('lists', response);
+          }
+        );
+        await executeApiCall(
+          readTodoCards,
+          (response) => {
+            setCards(response as TodoCard[]);
+            saveLocalData('cards', response);
+          }
+        );
       }
-    );
+    })()
   }, []);
 
   // Validate list name
@@ -288,19 +294,6 @@ export default function App() {
     }
     return formattedDate;
   }
-  
-  let testtext = '';
-
-  async function test() {
-    let l = await getLocalData('lists');
-    let c = await  getLocalData('cards');
-    let ls = await getLocalData('lastSaved');
-    testtext = l + ' ' +  c + ' ' + ls
-  }
-
-  setInterval(() => {
-    test();
-  }, 100);
 
   return (
     <View style={styles.wrapper}>
@@ -422,9 +415,6 @@ export default function App() {
         <Text style={styles.addText}>Add new list</Text>
       </TouchableOpacity>
       <Toast />
-      <>
-      { testtext }
-      </>
     </View>
   );
 }

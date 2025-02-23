@@ -12,6 +12,7 @@ const base = API_BASE_URL || 'http://localhost:8000';
 const todoLists = `${base}/todo-lists/`;
 const todoCards = `${base}/todo-cards/`;
 const lastSaved = `${base}/last-saved/`;
+const sync = `${todoLists}sync/`;
 const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
@@ -65,5 +66,10 @@ export async function deleteTodoCard(id: TodoCard['id']) {
 export async function readLastSaved() {
     let response = await axios.get<LastSaved>(lastSaved, {headers});
     response.data["timestamp"] = new Date(response.data.timestamp);
+    return response.data;
+}
+
+export async function syncToCloud(lists: TodoList[], cards: TodoCard[]) {
+    const response = await axios.post<SuccessResponse>(sync, {lists, cards}, {headers});
     return response.data;
 }
