@@ -18,21 +18,26 @@
       }
     },
     "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+    "bundler": "metro",
+    "output": "static",
+    "favicon": "./assets/images/favicon.png"
+    },
+    "macos": {
+    "bundleIdentifier": "com.myapp",
+    "buildNumber": "1.0.0"
     },
     "plugins": [
-      "expo-router",
-      [
+    "expo-router",
+    "expo-dev-client",
+    [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+        "image": "./assets/images/splash-icon.png",
+        "imageWidth": 200,
+        "resizeMode": "contain",
+        "backgroundColor": "#ffffff"
         }
-      ]
+    ]
     ],
     "experiments": {
       "typedRoutes": true

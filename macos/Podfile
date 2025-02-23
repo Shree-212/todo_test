@@ -1,0 +1,25 @@
+require_relative '../node_modules/react-native-macos/scripts/react_native_pods'
+require_relative '../node_modules/expo/scripts/autolinking'
+
+platform :osx, "11.0"
+use_frameworks!
+
+prepare_react_native_project!
+
+target "my-app-macOS" do
+use_expo_modules!
+use_native_modules!
+# Required for runtime text, network and debugging support
+pod 'React-Core/DevSupport', :path => '../node_modules/react-native-macos/'
+pod 'React-Core/RCTWebSocket', :path => '../node_modules/react-native-macos/'
+pod 'React-RCTText', :path => '../node_modules/react-native-macos/Libraries/Text'
+pod 'React-Core/RCTTextHeaders', :path => '../node_modules/react-native-macos/'
+use_react_native!(
+    :path => "../node_modules/react-native-macos",
+    :hermes_enabled => false
+)
+
+post_install do |installer|
+react_native_post_install(installer)
+end
+end
