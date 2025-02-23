@@ -1,129 +1,117 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Button, FlatList, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import { useEffect, useState } from 'react';
 import TodoList from './models/TodoList';
 import TodoCard from './models/TodoCard';
-import TodoListAPI from './api/TodoListAPI';
-import TodoCardAPI from './api/TodoCardAPI';
-import NetInfo from "@react-native-community/netinfo";
-import { SuccessResponse } from './api/API';
+import { createTodoCard, createTodoList, deleteTodoCard, deleteTodoList, readLastSaved, readTodoCards, readTodoLists, SuccessResponse, updateTodoCard, updateTodoList } from './api';
 import { v4 } from 'uuid';
-import LastSavedAPI from './api/LastSavedAPI';
 import LastSaved from './models/LastSaved';
+import { TextInput, TouchableOpacity, View, Text } from 'react-native';
+import { Checkbox } from "react-native-paper";
+import styles from './styles';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import Toast from 'react-native-toast-message';
+import { getLocalData, saveLocalData } from './localStorage';
 
 type APIResponse = SuccessResponse | TodoList[] | TodoCard[] | LastSaved;
 
-function App() {
-  const todoListAPI = new TodoListAPI();
-  const todoCardAPI = new TodoCardAPI();
-  const lastSavedAPI = new LastSavedAPI();
-  const [offlineQueue, setOfflineQueue] = useState<(() => Promise<APIResponse | undefined>)[]>([]); // Queue for offline API calls
-  const [isConnected, setIsConnected] = useState(true);
-  
+export default function App() {
   const [lists, setLists] = useState<TodoList[]>([]);
-  const [newListName, setNewListName] = useState<TodoList["name"]>('');
   const [editingListId, setEditingListId] = useState<TodoList["id"] | null>(null);
   const [editingListName, setEditingListName] = useState<TodoList["name"]>('');
-  const [selectedListId, setSelectedListId] = useState<TodoList["id"] | null>(null);
   const [cards, setCards] = useState<TodoCard[]>([]);
+  const [creatingCard, setCreatingCard] = useState(false);
   const [newCardText, setNewCardText] = useState<TodoCard["text"]>('');
+  const [selectedListId, setSelectedListId] = useState<TodoList["id"] | null>(null);
   const [editingCardId, setEditingCardId] = useState<TodoCard["id"] | null>(null);
   const [editingCardText, setEditingCardText] = useState<TodoCard["text"]>('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  
 
-  // If online, run the operation immediately, otherwise add it to the queue
-  async function executeOperation(operation: () => Promise<APIResponse>, then?: (response: APIResponse) => void) {
-    const apiCall = async () => {
-      try {
-        const response = await operation();
-        if (("success" in response && !response.success) || (Array.isArray(response) && response.length === 0)) {
-          throw response;
-        }
-        return response;
-      } catch (error) {
-        console.error("API call failed:", error);
-      }
-    }
-    if (isConnected) {
+  async function executeApiCall(apiCall: () => Promise<APIResponse>, then?: (response: APIResponse) => void) {
+    try {
       const response = await apiCall();
-      if (then && response) {
+      if (!response || ("success" in response && !response.success) || (Array.isArray(response) && response.length === 0)) {
+        throw response;
+      }
+      const lastSavedResponse = await readLastSaved();
+      setLastSaved(lastSavedResponse.timestamp);
+      saveLocalData('lastSaved', lastSavedResponse.timestamp);
+      if (then) {
         then(response);
       }
+    } catch (error: any) {
+      if (error && "code" in error && error["code"] == "ERR_NETWORK") {
+        // Offline
+        
+      }
+      console.error("API call failed:", error);
     }
-    setOfflineQueue(prev => [...prev, apiCall]);
   }
 
-  // Listen to network changes; process offline queue when reconnected
+  // Fetch lists & cards
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(async (state) => {
-      setIsConnected(state.isConnected || false);
-      if (state.isConnected) {
-        for (const apiCall of offlineQueue) {
-          await apiCall(); // Execute each pending API call
-        }
-        setOfflineQueue([]); // Clear queue after processing
-      }
+    getLocalData('lists').then(localLists => {
+      setLists(localLists as TodoList[] || []);
     });
-    return () => unsubscribe();
-  }, []);
-
-  // Select first list by default
-  function selectFirstList() {
-    if (lists.length > 0) {
-      setSelectedListId(lists[0].id);
-    } else {
-      setSelectedListId(null);
-    }
-  }
-
-  // Fetch lists
-  useEffect(() => {
-    executeOperation(
-      todoListAPI.readTodoLists,
+    getLocalData('cards').then(localCards => {
+      setCards(localCards as TodoCard[] || []);
+    });
+    getLocalData('lastSaved').then(localLastSaved => {
+      setLastSaved(localLastSaved.timestamp);
+    })
+    executeApiCall(
+      readTodoLists,
       (response) => {
-        setLists(response as TodoList[])
-        selectFirstList();
+        setLists(response as TodoList[]);
+        saveLocalData('lists', response);
+      }
+    );
+    executeApiCall(
+      readTodoCards,
+      (response) => {
+        setCards(response as TodoCard[]);
+        saveLocalData('cards', response);
       }
     );
   }, []);
-
-  // Fetch last saved timestamp
-  useEffect(() => {
-    executeOperation(
-      lastSavedAPI.readLastSaved,
-      (response) => {
-        setLastSaved((response as LastSaved).timestamp);
-      }
-    );
-  }, []);
-
 
   // Validate list name
   function listNameIsValid(name: string) {
-    // TODO: Raise error toasts for invalid card text
-
-    // Check if the list name is not empty and not already in the list
-    return name && !lists.some(list => list.name.toLowerCase() === name.toLowerCase());
+    if (!name) {
+      Toast.show({
+        type: 'error',
+        text1: 'List name cannot be empty',
+      });
+      return false;
+    }
+    if (lists.some(list => list.name.toLowerCase() === name.toLowerCase())) {
+      Toast.show({
+        type: 'error',
+        text1: `"${name}" list name already exists`,
+      });
+      return false;
+    }
+    return true;
   }
 
   // Create a new to-do list
   function createList() {
-    const name = newListName.trim();
-    if (!listNameIsValid(name)) {
-      return;
-    }
     const newList = {
       id: v4(),
-      name
+      name: 'List no. ' + (lists.length + 1)
     };
-    setLists(prev => [...prev, newList]);
-    setSelectedListId(newList.id);
-    setNewListName('');
-    executeOperation(() => todoListAPI.createTodoList(newList));
+    setLists(prev => {
+      const newLists = [...prev, newList]
+      saveLocalData('lists', newLists);
+      return newLists
+    });
+    executeApiCall(() => createTodoList(newList));
+    startEditingList(newList);
   }
 
   // Start editing a to-do list
   function startEditingList(list: TodoList) {
+    cancelEditingCard();
+    cancelEditingList();
+    cancelCreatingCard();
     setEditingListId(list.id);
     setEditingListName(list.name);
   }
@@ -136,7 +124,8 @@ function App() {
 
   // Update a to-do list
   function updateList() {
-    if (!(editingListId && editingListName)) {
+    cancelEditingList();
+    if (!editingListId) {
       return;
     }
     const name = editingListName.trim();
@@ -145,55 +134,82 @@ function App() {
     }
     const updatedList = { id: editingListId, name };
     setLists(lists.map(list => list.id === editingListId ? updatedList : list));
-
-    executeOperation(() => todoListAPI.updateTodoList(updatedList));
-
-    cancelEditingList();
+    saveLocalData('lists', lists.map(list => list.id === editingListId ? updatedList : list));
+    executeApiCall(() => updateTodoList(updatedList));
   }
 
   // Delete a to-do list
   function deleteList(id: TodoList["id"]) {
     setLists(lists.filter(list => list.id !== id));
-
+    saveLocalData('lists', lists.filter(list => list.id !== id));
     // Remove cards associated with the deleted list
     setCards(cards.filter(card => card.listId !== id));
-
-    executeOperation(() => todoListAPI.deleteTodoList(id));
-
-    // If the deleted list was currently selected, select the first list
-    if (selectedListId === id) {
-      selectFirstList();
-    }
+    saveLocalData('cards', cards.filter(card => card.listId !== id));
+    executeApiCall(() => deleteTodoList(id));
   }
 
   // Validate card text
   function cardIsValid(card: TodoCard) {
-    // TODO: Raise error toasts for invalid card text
-    return card.text && !cards.some(c => c.listId === card.listId && c.text.toLowerCase() === card.text.toLowerCase());
+    if (!card.text) {
+      Toast.show({
+        type: 'error',
+        text1: 'Task cannot be empty',
+      });
+      return false;
+    }
+    if (cards.some(c => c.listId === card.listId && c.text.toLowerCase() === card.text.toLowerCase())) {
+      Toast.show({
+        type: 'error',
+        text1: 'Task already exists',
+      });
+      return false;
+    }
+    return true;
   }
 
   // Add a new to-do card in the selected list
-  function createCard() {
-    if (selectedListId) {
-      const newCard = {
-        id: v4(),
-        text: newCardText.trim(),
-        listId: selectedListId,
-        completed: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      }
-      if (!cardIsValid(newCard)) {
-        return;
-      }
-      setCards(cards => [...cards, newCard]);
-      setNewCardText('');
-      executeOperation(() => todoCardAPI.createTodoCard(newCard));
+  function createCard(listId: TodoList["id"]) {
+    const newCard = {
+      id: v4(),
+      text: newCardText.trim(),
+      listId,
+      completed: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
     }
+    if (!cardIsValid(newCard)) {
+      return;
+    }
+    setCards(cards => {
+      const newCards = [...cards, newCard];
+      saveLocalData('cards', newCards);
+      return newCards;
+    });
+    cancelCreatingCard();
+    executeApiCall(() => createTodoCard(newCard));
+  }
+
+  // Start creating a new to-do card
+  function startCreatingCard(listId: TodoList["id"]) {
+    cancelEditingCard();
+    cancelEditingList();
+    cancelCreatingCard();
+    setCreatingCard(true);
+    setSelectedListId(listId);
+  }
+
+  // Cancel creating a new to-do card
+  function cancelCreatingCard() {
+    setCreatingCard(false);
+    setNewCardText('');
+    setSelectedListId(null);
   }
 
   // Start editing a to-do card
   function startEditingCard(card: TodoCard) {
+    cancelEditingCard();
+    cancelEditingList();
+    cancelCreatingCard();
     setEditingCardId(card.id);
     setEditingCardText(card.text);
   }
@@ -206,27 +222,32 @@ function App() {
 
   // Update a to-do card
   function updateCard() {
-    if (!(editingCardId && editingCardText)) {
+    cancelEditingCard();
+    if (!editingCardId) {
       return;
     }
-    const updatedCard = cards.find(card => card.id === editingCardId);
+    let updatedCard = cards.find(card => card.id === editingCardId);
     if (!updatedCard) {
       return;
     }
-    updatedCard.text = editingCardText;
-    updatedCard.updatedAt = new Date();
+    updatedCard = {
+      ...updatedCard,
+      text: editingCardText,
+      updatedAt: new Date()
+    }
     if (!cardIsValid(updatedCard)) {
       return;
     }
     setCards(cards.map(card => card.id === editingCardId ? updatedCard : card));
-    executeOperation(() => todoCardAPI.updateTodoCard(updatedCard));
-    cancelEditingCard();
+    saveLocalData('cards', cards.map(card => card.id === editingCardId ? updatedCard : card));
+    executeApiCall(() => updateTodoCard(updatedCard));
   }
 
   // Delete a to-do card
   function deleteCard(id: TodoCard["id"]) {
     setCards(cards.filter(card => card.id !== id));
-    executeOperation(() => todoCardAPI.deleteTodoCard(id));
+    saveLocalData('cards', cards.filter(card => card.id !== id));
+    executeApiCall(() => deleteTodoCard(id));
   }
 
   // Toggle to-card completion status
@@ -241,91 +262,8 @@ function App() {
       updatedAt: new Date()
     }
     setCards(cards.map(card => card.id === id ? updatedCard : card));
-    executeOperation(() => todoCardAPI.updateTodoCard(updatedCard));
-  }
-
-  // Render a list item with Edit and Delete functionality
-  function renderList(list: TodoList) {
-    return (
-      <View key={list.id} style={styles.listWrapper}>
-        {editingListId === list.id ? (
-          <>
-            <TextInput
-              style={styles.listInput}
-              value={editingListName}
-              onChangeText={setEditingListName}
-            />
-            <Button title="Save" onPress={() => updateList()} />
-            <Button title="Cancel" onPress={cancelEditingList} color="gray" />
-          </>
-        ) : (
-          <>
-            <View
-              key={list.id}
-              style={{
-                position: 'relative',
-                margin: 5,
-                padding: 10,
-                paddingBottom: 30, // Added extra padding at the bottom
-                backgroundColor: '#ddd',
-                borderRadius: 5,
-              }}
-            >
-
-              <Text style={{ fontSize: 16 }} onPress={() => setSelectedListId(list.id)}>{list.name}</Text>
-              <View
-                style={{
-                  position: 'absolute',
-                  right: 5,
-                  bottom: 5,
-                  flexDirection: 'row',
-                }}
-              >
-                <TouchableOpacity onPress={() => startEditingList(list)}>
-                  <Text style={{ fontSize: 14, marginRight: 10 }}>✎</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => deleteList(list.id)}>
-                  <Text style={{ fontSize: 14, color: 'red' }}>✖</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </>
-        )}
-      </View>
-    );
-  }
-
-  // Render a single card item with edit and delete options
-  function renderCard({ item }: { item: TodoCard }) {
-    return (
-      <View style={styles.cardItem}>
-        {editingCardId === item.id ? (
-          <>
-            <TextInput
-              style={styles.cardInput}
-              value={editingCardText}
-              onChangeText={setEditingCardText}
-            />
-            <Button title="Save" onPress={() => updateCard()} />
-          </>
-        ) : (
-          <>
-            <Text style={[styles.newCardText, item.completed && { textDecorationLine: 'line-through' }]}>
-              {item.text}
-            </Text>
-            {/* Toggle button for marking as done/not done */}
-            <Text>Created at: {item.createdAt.toLocaleDateString()}</Text>
-            <Button
-              title={item.completed ? "Not Done" : "Done"}
-              onPress={() => toggleCardCompletion(item.id)}
-            />
-            {/* <Text style={styles.newCardText}>{item.text}</Text> */}
-            <Button title="Edit" onPress={() => startEditingCard(item)} />
-            <Button title="Delete" onPress={() => deleteCard(item.id)} />
-          </>
-        )}
-      </View>
-    );
+    saveLocalData('cards', cards.map(card => card.id === id ? updatedCard : card));
+    executeApiCall(() => updateTodoCard(updatedCard));
   }
 
   // Format date
@@ -350,91 +288,143 @@ function App() {
     }
     return formattedDate;
   }
+  
+  let testtext = '';
+
+  async function test() {
+    let l = await getLocalData('lists');
+    let c = await  getLocalData('cards');
+    let ls = await getLocalData('lastSaved');
+    testtext = l + ' ' +  c + ' ' + ls
+  }
+
+  setInterval(() => {
+    test();
+  }, 100);
 
   return (
-    <View style={styles.container}>
-      {lastSaved && (
-        <Text style={styles.title}>Last saved at {formatDate(lastSaved)}</Text>
-      )}
-      <Text style={styles.title}>Dynamic Todo List App</Text>
-
-      {/* Section to add a new list */}
-      <View style={styles.listInputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="To-do list name"
-          value={newListName}
-          onChangeText={setNewListName}
-        />
-        <Button title="Add list" onPress={createList} />
-      </View>
-
-      {/* Display list of lists */}
-      <View style={styles.listContainer}>
-        {lists.map(renderList)}
-      </View>
-
-      {/* Section for adding a new card under the selected list */}
-      {selectedListId && (
-        <View style={styles.inputContainer}>
-          <Text style={styles.selectedListTitle}>
-            Cards for "{lists.find(list => list.id === selectedListId)?.name}"
-          </Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Add a new card"
-            value={newCardText}
-            onChangeText={setNewCardText}
-          />
-          <Button title="Add Card" onPress={createCard} />
+    <View style={styles.wrapper}>
+      <Text style={styles.heading}>To-do or not to-do?</Text>
+      <Text style={styles.lastSaved}>{lastSaved ? `Changes last saved at ${formatDate(lastSaved)}` : ''}</Text>
+      <View style={styles.container}>
+        <View style={styles.lists}>
+          {lists.map((list, index) => (
+            <View style={styles.list} key={list.id}>
+              {
+                editingListId === list.id ?
+                  <View style={styles.listHeader}>
+                    <TextInput
+                      style={styles.listNameInput}
+                      value={editingListName}
+                      onChangeText={setEditingListName}
+                      autoFocus
+                    />
+                    <View style={styles.listActions}>
+                      <TouchableOpacity style={styles.editListBtn} onPress={updateList}>
+                        <MaterialIcons name="save" size={20} color={'#fff'} />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.cancelBtn} onPress={cancelEditingList}>
+                        <MaterialIcons name="cancel" size={20} color={'#fff'} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  :
+                  <View style={styles.listHeader}>
+                    <Text style={styles.listName}>#{index + 1}: {list.name}</Text>
+                    <View style={styles.listActions}>
+                      <TouchableOpacity style={{ marginRight: 15 }} onPress={() => startEditingList(list)}>
+                        <MaterialIcons name="edit" size={20} />
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => deleteList(list.id)}>
+                        <MaterialIcons name="delete" size={20} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+              }
+              <View style={styles.cards}>
+                {
+                  cards.map(card => {
+                    if (card.listId === list.id) {
+                      return (
+                        <View style={styles.card} key={card.id}>
+                          {
+                            editingCardId === card.id ?
+                              <View style={styles.cardHeader}>
+                                <TextInput
+                                  style={styles.cardTextInput}
+                                  value={editingCardText}
+                                  onChangeText={setEditingCardText}
+                                  autoFocus
+                                />
+                                <View style={styles.cardActions}>
+                                  <TouchableOpacity style={styles.editListBtn} onPress={updateCard}>
+                                    <MaterialIcons name="save" size={20} color={'#fff'} />
+                                  </TouchableOpacity>
+                                  <TouchableOpacity style={styles.cancelBtn} onPress={cancelEditingCard}>
+                                    <MaterialIcons name="cancel" size={20} color={'#fff'} />
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                              :
+                              <View style={styles.cardHeader}>
+                                <View style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+                                  <Checkbox status={card.completed ? 'checked' : 'unchecked'} onPress={() => toggleCardCompletion(card.id)} />
+                                  <Text style={card.completed ? styles.completedTask : {}}>{card.text}</Text>
+                                </View>
+                                <View style={styles.cardActions}>
+                                  <TouchableOpacity style={{ marginRight: 15 }} onPress={() => startEditingCard(card)}>
+                                    <MaterialIcons name="edit" size={20} />
+                                  </TouchableOpacity>
+                                  <TouchableOpacity onPress={() => deleteCard(card.id)}>
+                                    <MaterialIcons name="delete" size={20} />
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                          }
+                        </View>
+                      );
+                    }
+                  })
+                }
+              </View>
+              {
+                creatingCard && selectedListId === list.id ?
+                  <View style={styles.cardInputContainer}>
+                    <TextInput
+                      style={styles.cardTextInput}
+                      value={newCardText}
+                      onChangeText={setNewCardText}
+                      autoFocus
+                    />
+                    {
+                      <View style={styles.cardActions}>
+                        <TouchableOpacity style={styles.editListBtn} onPress={() => createCard(list.id)}>
+                          <MaterialIcons name="save" size={20} color={'#fff'} />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.cancelBtn} onPress={cancelCreatingCard}>
+                          <MaterialIcons name="cancel" size={20} color={'#fff'} />
+                        </TouchableOpacity>
+                      </View>
+                    }
+                  </View>
+                  :
+                  <TouchableOpacity style={styles.addCard} onPress={() => startCreatingCard(list.id)}>
+                    <MaterialIcons name="add" size={16} color={'#fff'} />
+                    <Text style={styles.addText}>Add new task</Text>
+                  </TouchableOpacity>
+              }
+            </View>
+          ))}
         </View>
-      )}
-
-      {/* List cards for the selected list */}
-      {selectedListId && (
-        <FlatList
-          data={cards.filter(card => card.listId === selectedListId)}
-          keyExtractor={item => item.id}
-          renderItem={renderCard}
-          style={{ marginTop: 20 }}
-        />
-      )}
+      </View>
+      <TouchableOpacity style={styles.addList} onPress={createList}>
+        <MaterialIcons name="add" size={16} color={'#fff'} />
+        <Text style={styles.addText}>Add new list</Text>
+      </TouchableOpacity>
+      <Toast />
+      <>
+      { testtext }
+      </>
     </View>
   );
 }
-
-const { width, height } = Dimensions.get('window');
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingTop: height * 0.05,    // 5% of screen height
-    paddingRight: width * 0.15,   // 13% of screen width
-    paddingBottom: height * 0.05, // 13% of screen height
-    paddingLeft: width * 0.15,    // 5% of screen width
-    marginTop: 50,
-  }, title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  listInputContainer: { flexDirection: 'row', marginBottom: 20 },
-  // input: { flex: 1, borderColor: '#ccc', borderWidth: 1, marginRight: 10, paddingHorizontal: 10 },
-  input: {
-    width: '100%',   // Increase this percentage to your desired width
-    borderColor: '#ccc',
-    height: 34,
-    borderWidth: 1,
-    marginRight: 10,
-    paddingHorizontal: 10
-  },
-  listContainer: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 20 },
-  listWrapper: { flexDirection: 'row', alignItems: 'center', margin: 5 },
-  listButton: { padding: 10, backgroundColor: '#ddd', borderRadius: 5 },
-  selectedList: { backgroundColor: '#bbb' },
-  listText: { fontSize: 16 },
-  listInput: { flex: 1, borderColor: '#ccc', borderWidth: 1, paddingHorizontal: 10 },
-  selectedListTitle: { fontSize: 18, marginBottom: 10, textAlign: 'center' },
-  inputContainer: { marginBottom: 20 },
-  cardItem: { padding: 10, borderBottomWidth: 1, borderColor: '#eee', flexDirection: 'row', alignItems: 'center' },
-  newCardText: { flex: 1 },
-  cardInput: { flex: 1, borderColor: '#ccc', borderWidth: 1, marginRight: 10, paddingHorizontal: 10 }
-});
-
-export default App;
