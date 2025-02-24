@@ -1,43 +1,60 @@
-import * as FileSystem from 'expo-file-system';
-import { Platform } from 'react-native';
+import SQLite from 'react-native-sqlite-storage';
 
-const fileUri = FileSystem.documentDirectory + 'localData.json';
+// Open or create the database
+const db = SQLite.openDatabase(
+  { name: 'localData.db', location: 'default' },
+  () => console.log('Database opened'),
+  (error) => console.error('Database open error:', error)
+);
 
+// Create table if not exists
+db.transaction((tx) => {
+  tx.executeSql(
+    'CREATE TABLE IF NOT EXISTS localData (key TEXT PRIMARY KEY, value TEXT)',
+    [],
+    () => console.log('Table ready'),
+    (error) => console.error('Table creation error:', error)
+  );
+});
+
+// Save data
 export async function saveLocalData(key: string, value: any) {
-  if (!value){
-    return
-  }
+  if (!value) return;
+
   try {
-    if (Platform.OS === 'web') {
-      localStorage.setItem(key, JSON.stringify(value));
-    } else {
-      let existingData: {[key: string]: any} = {};
-      const fileExists = await FileSystem.getInfoAsync(fileUri);
-      if (fileExists.exists) {
-        const fileContent = await FileSystem.readAsStringAsync(fileUri);
-        existingData = JSON.parse(fileContent);
-      }
-      existingData[key] = value;
-      await FileSystem.writeAsStringAsync(fileUri, JSON.stringify(existingData));
-    }
+    const jsonValue = JSON.stringify(value);
+    db.transaction((tx) => {
+      tx.executeSql(
+        'INSERT OR REPLACE INTO localData (key, value) VALUES (?, ?)',
+        [key, jsonValue],
+        () => console.log(`Data saved for key: ${key}`),
+        (error) => console.error('Insert error:', error)
+      );
+    });
   } catch (e) {
     console.error('Error saving data:', e);
   }
 }
 
-export async function getLocalData(key: string) {
-  try {
-    if (Platform.OS === 'web') {
-      const data = localStorage.getItem(key);
-      return data ? JSON.parse(data) : null;
-    } else {
-      const fileExists = await FileSystem.getInfoAsync(fileUri);
-      if (!fileExists.exists) return null;
-      const fileContent = await FileSystem.readAsStringAsync(fileUri);
-      const data = JSON.parse(fileContent);
-      return data[key] || null;
-    }
-  } catch (e) {
-    console.error('Error retrieving data:', e);
-  }
+// Get data
+export async function getLocalData(key: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    db.transaction((tx) => {
+      tx.executeSql(
+        'SELECT value FROM localData WHERE key = ?',
+        [key],
+        (_, result) => {
+          if (result.rows.length > 0) {
+            resolve(JSON.parse(result.rows.item(0).value));
+          } else {
+            resolve(null);
+          }
+        },
+        (error) => {
+          console.error('Select error:', error);
+          reject(error);
+        }
+      );
+    });
+  });
 }
