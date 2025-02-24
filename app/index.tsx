@@ -40,7 +40,7 @@ export default function App() {
     } catch (error: any) {
       if (error && "code" in error && error["code"] == "ERR_NETWORK") {
         // Offline
-        saveLocalData('syncNeeded', true);
+        saveLocalData('sync', {needed: true});
       }
       console.error("API call failed:", error);
     }
@@ -48,17 +48,19 @@ export default function App() {
 
   // Fetch lists & cards
   useEffect(() => {
-    (async () => {
+    const intervalId = setInterval(async () => {
       const localLists = await getLocalData('lists');
       setLists(localLists as TodoList[] || []);
       const localCards = await getLocalData('cards');
       setCards(localCards as TodoCard[] || []);
       const localLastSaved = await getLocalData('lastSaved');
-      setLastSaved(localLastSaved.timestamp);
-      const syncNeeded = await getLocalData('syncNeeded');
-      if (syncNeeded) {
+      if (localLastSaved && lastSaved && localLastSaved.timestamp && formatDate(localLastSaved.timestamp as Date) !== formatDate(lastSaved)) {
+        setLastSaved(localLastSaved.timestamp);
+      }
+      const sync = await getLocalData('sync');
+      if (sync && sync["needed"]) {
+        await saveLocalData('sync', {needed: false});
         await executeApiCall(() => syncToCloud(localLists, localCards));
-        await saveLocalData('syncNeeded', false);
       }
       else {
         await executeApiCall(
@@ -76,7 +78,8 @@ export default function App() {
           }
         );
       }
-    })()
+    }, 1000);
+    return () => clearInterval(intervalId); // Cleanup on unmount
   }, []);
 
   // Validate list name
