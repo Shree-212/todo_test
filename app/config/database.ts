@@ -24,12 +24,18 @@ export const DB_CONFIG = {
 export const API_CONFIG = {
   url: process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000',
   timeout: 5000,
-  retryAttempts: 3
+  retryAttempts: 3,
+  endpoints: {
+    sync: '/sync',
+    lists: '/todo-lists',
+    cards: '/todo-cards'
+  }
 };
 
 // Sync configuration
 export const SYNC_CONFIG = {
   interval: 30000,
   maxRetries: 3,
-  batchSize: 50
+  batchSize: 50,
+  backoffDelay: 1000 // 1 second initial backoff
 };

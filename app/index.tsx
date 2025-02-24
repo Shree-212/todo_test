@@ -1,19 +1,15 @@
 import { useEffect, useState } from 'react';
 import TodoList from './models/TodoList';
 import TodoCard from './models/TodoCard';
-import { createTodoCard, createTodoList, deleteTodoCard, deleteTodoList, readLastSaved, readTodoCards, readTodoLists, SuccessResponse, syncToCloud, updateTodoCard, updateTodoList } from './api';
 import { v4 } from 'uuid';
-import LastSaved from './models/LastSaved';
 import { TextInput, TouchableOpacity, View, Text } from 'react-native';
 import { Checkbox } from "react-native-paper";
 import styles from './styles';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Toast from 'react-native-toast-message';
-import { getLocalData, saveLocalData } from './localStorage';
-import * as db from './services/database';
+import * as storage from './localStorage';
 import { syncManager } from './services/sync';
-
-type APIResponse = SuccessResponse | TodoList[] | TodoCard[] | LastSaved;
+import { getStorageLocation, exportStorageData } from './utils/storage-debug';
 
 export default function App() {
   const [lists, setLists] = useState<TodoList[]>([]);
@@ -27,44 +23,43 @@ export default function App() {
   const [editingCardText, setEditingCardText] = useState<TodoCard["text"]>('');
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  async function executeApiCall(apiCall: () => Promise<APIResponse>, then?: (response: APIResponse) => void) {
-    try {
-      const response = await apiCall();
-      if (!response || ("success" in response && !response.success) || (Array.isArray(response) && response.length === 0)) {
-        throw response;
-      }
-      const lastSavedResponse = await readLastSaved();
-      setLastSaved(lastSavedResponse.timestamp);
-      saveLocalData('lastSaved', lastSavedResponse.timestamp);
-      if (then) {
-        then(response);
-      }
-    } catch (error: any) {
-      if (error && "code" in error && error["code"] == "ERR_NETWORK") {
-        // Offline
-        saveLocalData('sync', {needed: true});
-      }
-      console.error("API call failed:", error);
-    }
-  }
-
-  // Fetch lists & cards
+  // Initialize app with localStorage instead of database
   useEffect(() => {
+    let isMounted = true;
+
     const initApp = async () => {
       try {
-        await db.initDatabase();
-        const localLists = await db.getLists();
-        setLists(localLists);
-        const localCards = await db.getCards();
-        setCards(localCards);
+        await storage.initStorage();
+
+        // Log storage location in development
+        if (__DEV__) {
+          await getStorageLocation();
+        }
+
+        const [localLists, localCards] = await Promise.all([
+          storage.getLists(),
+          storage.getCards()
+        ]);
+
+        if (isMounted) {
+          setLists(localLists);
+          setCards(localCards);
+        }
       } catch (error) {
         console.error('App initialization failed:', error);
+        if (isMounted) {
+          Toast.show({
+            type: 'error',
+            text1: 'Failed to initialize app'
+          });
+        }
       }
     };
 
     initApp();
+
     return () => {
-      // Cleanup sync manager
+      isMounted = false;
       syncManager.destroy();
     };
   }, []);
@@ -98,14 +93,13 @@ export default function App() {
     };
     
     try {
-      await db.createList(newList);
+      await storage.createList(newList);
       setLists(prev => [...prev, newList]);
     } catch (error) {
       Toast.show({
         type: 'error',
         text1: 'Failed to create list'
       });
-      console.error('Failed to create list:', error);
     }
   }
 
@@ -136,7 +130,7 @@ export default function App() {
     };
 
     try {
-      await db.updateList(updatedList);
+      await storage.updateList(updatedList);
       setLists(lists.map(list => list.id === editingListId ? updatedList : list));
       cancelEditingList();
     } catch (error) {
@@ -151,7 +145,7 @@ export default function App() {
   // Delete a to-do list
   async function deleteList(id: string) {
     try {
-      await db.deleteList(id);
+      await storage.deleteList(id);
       setLists(lists.filter(list => list.id !== id));
       setCards(cards.filter(card => card.listId !== id));
     } catch (error) {
@@ -199,7 +193,7 @@ export default function App() {
     }
 
     try {
-      await db.createCard(newCard);
+      await storage.createCard(newCard);
       setCards(prev => [...prev, newCard]);
       cancelCreatingCard();
     } catch (error) {
@@ -265,7 +259,7 @@ export default function App() {
     }
 
     try {
-      await db.updateCard(updatedCard);
+      await storage.updateCard(updatedCard);
       setCards(prev => prev.map(card => card.id === editingCardId ? updatedCard : card));
       cancelEditingCard();
     } catch (error) {
@@ -280,7 +274,7 @@ export default function App() {
   // Delete a to-do card
   async function deleteCard(id: TodoCard["id"]) {
     try {
-      await db.deleteCard(id);
+      await storage.deleteCard(id);
       setCards(prev => prev.filter(card => card.id !== id));
     } catch (error) {
       Toast.show({
@@ -306,7 +300,7 @@ export default function App() {
     };
 
     try {
-      await db.updateCard(updatedCard);
+      await storage.updateCard(updatedCard);
       setCards(prev => prev.map(card => card.id === id ? updatedCard : card));
     } catch (error) {
       Toast.show({
