@@ -1,9 +1,24 @@
 import SQLite from 'react-native-sqlite-storage';
+import { Platform } from 'react-native';
+import RNFS from 'react-native-fs';
+
+// Determine database file path
+let dbPath: string;
+
+if (Platform.OS === 'android') {
+  dbPath = `${RNFS.ExternalDirectoryPath}/localData.db`; // External storage (persists after uninstall)
+} else if (Platform.OS === 'ios') {
+  dbPath = `${RNFS.DocumentDirectoryPath}/localData.db`; // Documents directory (persists after uninstall)
+} else if (Platform.OS === 'windows' || Platform.OS === 'macos') {
+  dbPath = `${RNFS.DocumentDirectoryPath}/localData.db`; // Documents directory (persists after uninstall)
+} else {
+  dbPath = 'localData.db'; // Fallback for unknown platforms
+}
 
 // Open or create the database
 const db = SQLite.openDatabase(
-  { name: 'localData.db', location: 'default' },
-  () => console.log('Database opened'),
+  { name: 'localData.db', location: 'default', createFromLocation: dbPath },
+  () => console.log('Database opened at:', dbPath),
   (error) => console.error('Database open error:', error)
 );
 
