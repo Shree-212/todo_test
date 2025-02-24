@@ -32,6 +32,13 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
+      ],
+      "expo-sqlite",
+      [
+        "expo-file-system",
+        {
+          "persistence": "local"
+        }
       ]
     ],
     "experiments": {

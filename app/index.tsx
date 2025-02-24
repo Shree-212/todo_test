@@ -10,6 +10,8 @@ import styles from './styles';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Toast from 'react-native-toast-message';
 import { getLocalData, saveLocalData } from './localStorage';
+import * as db from './services/database';
+import { syncManager } from './services/sync';
 
 type APIResponse = SuccessResponse | TodoList[] | TodoCard[] | LastSaved;
 
@@ -48,38 +50,23 @@ export default function App() {
 
   // Fetch lists & cards
   useEffect(() => {
-    const intervalId = setInterval(async () => {
-      const localLists = await getLocalData('lists');
-      setLists(localLists as TodoList[] || []);
-      const localCards = await getLocalData('cards');
-      setCards(localCards as TodoCard[] || []);
-      const localLastSaved = await getLocalData('lastSaved');
-      if (localLastSaved && lastSaved && localLastSaved.timestamp && formatDate(localLastSaved.timestamp as Date) !== formatDate(lastSaved)) {
-        setLastSaved(localLastSaved.timestamp);
+    const initApp = async () => {
+      try {
+        await db.initDatabase();
+        const localLists = await db.getLists();
+        setLists(localLists);
+        const localCards = await db.getCards();
+        setCards(localCards);
+      } catch (error) {
+        console.error('App initialization failed:', error);
       }
-      const sync = await getLocalData('sync');
-      if (sync && sync["needed"]) {
-        await saveLocalData('sync', {needed: false});
-        await executeApiCall(() => syncToCloud(localLists, localCards));
-      }
-      else {
-        await executeApiCall(
-          readTodoLists,
-          (response) => {
-            setLists(response as TodoList[]);
-            saveLocalData('lists', response);
-          }
-        );
-        await executeApiCall(
-          readTodoCards,
-          (response) => {
-            setCards(response as TodoCard[]);
-            saveLocalData('cards', response);
-          }
-        );
-      }
-    }, 1000);
-    return () => clearInterval(intervalId); // Cleanup on unmount
+    };
+
+    initApp();
+    return () => {
+      // Cleanup sync manager
+      syncManager.destroy();
+    };
   }, []);
 
   // Validate list name
@@ -102,17 +89,24 @@ export default function App() {
   }
 
   // Create a new to-do list
-  function createList() {
-    const newList = {
+  async function createList() {
+    const newList: TodoList = {
       id: v4(),
-      name: 'List no. ' + (lists.length + 1)
+      name: `List no. ${(lists.length + 1)}`,
+      updated_at: Date.now(),
+      is_synced: 0
     };
-    setLists(prev => {
-      const newLists = [...prev, newList]
-      saveLocalData('lists', newLists);
-      return newLists
-    });
-    executeApiCall(() => createTodoList(newList));
+    
+    try {
+      await db.createList(newList);
+      setLists(prev => [...prev, newList]);
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to create list'
+      });
+      console.error('Failed to create list:', error);
+    }
   }
 
   // Start editing a to-do list
@@ -131,29 +125,42 @@ export default function App() {
   }
 
   // Update a to-do list
-  function updateList() {
-    cancelEditingList();
-    if (!editingListId) {
-      return;
+  async function updateList() {
+    if (!editingListId || !editingListName.trim()) return;
+
+    const updatedList: TodoList = {
+      id: editingListId,
+      name: editingListName.trim(),
+      updated_at: Date.now(),
+      is_synced: 0
+    };
+
+    try {
+      await db.updateList(updatedList);
+      setLists(lists.map(list => list.id === editingListId ? updatedList : list));
+      cancelEditingList();
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to update list'
+      });
+      console.error('Failed to update list:', error);
     }
-    const name = editingListName.trim();
-    if (!listNameIsValid(name)) {
-      return;
-    }
-    const updatedList = { id: editingListId, name };
-    setLists(lists.map(list => list.id === editingListId ? updatedList : list));
-    saveLocalData('lists', lists.map(list => list.id === editingListId ? updatedList : list));
-    executeApiCall(() => updateTodoList(updatedList));
   }
 
   // Delete a to-do list
-  function deleteList(id: TodoList["id"]) {
-    setLists(lists.filter(list => list.id !== id));
-    saveLocalData('lists', lists.filter(list => list.id !== id));
-    // Remove cards associated with the deleted list
-    setCards(cards.filter(card => card.listId !== id));
-    saveLocalData('cards', cards.filter(card => card.listId !== id));
-    executeApiCall(() => deleteTodoList(id));
+  async function deleteList(id: string) {
+    try {
+      await db.deleteList(id);
+      setLists(lists.filter(list => list.id !== id));
+      setCards(cards.filter(card => card.listId !== id));
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to delete list'
+      });
+      console.error('Failed to delete list:', error);
+    }
   }
 
   // Validate card text
@@ -176,25 +183,32 @@ export default function App() {
   }
 
   // Add a new to-do card in the selected list
-  function createCard(listId: TodoList["id"]) {
-    const newCard = {
+  async function createCard(listId: TodoList["id"]) {
+    const newCard: TodoCard = {
       id: v4(),
       text: newCardText.trim(),
       listId,
       completed: false,
       createdAt: new Date(),
       updatedAt: new Date(),
-    }
+      is_synced: 0
+    };
+
     if (!cardIsValid(newCard)) {
       return;
     }
-    setCards(cards => {
-      const newCards = [...cards, newCard];
-      saveLocalData('cards', newCards);
-      return newCards;
-    });
-    cancelCreatingCard();
-    executeApiCall(() => createTodoCard(newCard));
+
+    try {
+      await db.createCard(newCard);
+      setCards(prev => [...prev, newCard]);
+      cancelCreatingCard();
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to create task'
+      });
+      console.error('Failed to create card:', error);
+    }
   }
 
   // Start creating a new to-do card
@@ -229,49 +243,78 @@ export default function App() {
   }
 
   // Update a to-do card
-  function updateCard() {
-    cancelEditingCard();
-    if (!editingCardId) {
+  async function updateCard() {
+    if (!editingCardId || !editingCardText.trim()) {
       return;
     }
-    let updatedCard = cards.find(card => card.id === editingCardId);
-    if (!updatedCard) {
+
+    const existingCard = cards.find(card => card.id === editingCardId);
+    if (!existingCard) {
       return;
     }
-    updatedCard = {
-      ...updatedCard,
-      text: editingCardText,
-      updatedAt: new Date()
-    }
+
+    const updatedCard: TodoCard = {
+      ...existingCard,
+      text: editingCardText.trim(),
+      updatedAt: new Date(),
+      is_synced: 0
+    };
+
     if (!cardIsValid(updatedCard)) {
       return;
     }
-    setCards(cards.map(card => card.id === editingCardId ? updatedCard : card));
-    saveLocalData('cards', cards.map(card => card.id === editingCardId ? updatedCard : card));
-    executeApiCall(() => updateTodoCard(updatedCard));
+
+    try {
+      await db.updateCard(updatedCard);
+      setCards(prev => prev.map(card => card.id === editingCardId ? updatedCard : card));
+      cancelEditingCard();
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to update task'
+      });
+      console.error('Failed to update card:', error);
+    }
   }
 
   // Delete a to-do card
-  function deleteCard(id: TodoCard["id"]) {
-    setCards(cards.filter(card => card.id !== id));
-    saveLocalData('cards', cards.filter(card => card.id !== id));
-    executeApiCall(() => deleteTodoCard(id));
+  async function deleteCard(id: TodoCard["id"]) {
+    try {
+      await db.deleteCard(id);
+      setCards(prev => prev.filter(card => card.id !== id));
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to delete task'
+      });
+      console.error('Failed to delete card:', error);
+    }
   }
 
   // Toggle to-card completion status
-  function toggleCardCompletion(id: TodoCard["id"]) {
+  async function toggleCardCompletion(id: TodoCard["id"]) {
     const selectedCard = cards.find(card => card.id === id);
     if (!selectedCard) {
       return;
     }
-    const updatedCard = {
+
+    const updatedCard: TodoCard = {
       ...selectedCard,
       completed: !selectedCard.completed,
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      is_synced: 0
+    };
+
+    try {
+      await db.updateCard(updatedCard);
+      setCards(prev => prev.map(card => card.id === id ? updatedCard : card));
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to update task status'
+      });
+      console.error('Failed to toggle card completion:', error);
     }
-    setCards(cards.map(card => card.id === id ? updatedCard : card));
-    saveLocalData('cards', cards.map(card => card.id === id ? updatedCard : card));
-    executeApiCall(() => updateTodoCard(updatedCard));
   }
 
   // Format date

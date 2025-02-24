@@ -5,4 +5,5 @@ export default interface TodoCard {
     completed: boolean;
     createdAt: Date;
     updatedAt: Date;
+    is_synced?: number;
 }
