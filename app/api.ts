@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { API_BASE_URL } from '@env';
 import TodoList from './models/TodoList';
 import TodoCard from './models/TodoCard';
 import LastSaved from './models/LastSaved';
@@ -8,7 +7,8 @@ export interface SuccessResponse {
     success: boolean;
     id?: string;
 }
-const base = API_BASE_URL || 'http://localhost:8000';
+
+const base = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
 const todoLists = `${base}/todo-lists/`;
 const todoCards = `${base}/todo-cards/`;
 const lastSaved = `${base}/last-saved/`;
